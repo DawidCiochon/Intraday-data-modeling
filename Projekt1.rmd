@@ -1,0 +1,410 @@
+---
+title: "MRF Projekt I"
+author: "Dawid Ciochoń, Jakub Górowski, Adrian Gzyl"
+output: html_document
+---
+<style type="text/css">
+.main-container {
+  max-width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+<div style="text-align: justify"> 
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(readxl)
+library ("berryFunctions")
+library(ggplot2)
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/Admin/Desktop/MATERIALY AGH/II stopien/II rok/I semestr/Modelowanie rynków finansowych/Pr1")
+cdProj <- read_excel("cdProj.xlsx")
+bit11 <- read_excel("11bit.xlsx")
+cdProj$`<TIME>` <- format(cdProj$`<TIME>`, format = "%H:%M:%S")
+bit11$`<TIME>` <- format(bit11$`<TIME>`, format = "%H:%M:%S")
+```
+
+## 1.1 Pobranie danych
+
+Z serwisu Stooq pobrano pięciominutowe dane intraday dla spółek:   
+* [CD Projekt SA](https://stooq.pl/q/?s=cdr) - notowanej na WIG20  
+* [11 bit studios SA](https://stooq.pl/q/?s=11b) - notowanej na mWIG40  
+Spółki te zajmują się tworzeniem oprogramowania - w szczególności gier komputerowych. Zmodyfikowano indeks czasu, tak aby posiadał klasyczny format czasu (HH:MM:SS). Ponadto w danych zauważono braki (wynikające z braku obrotu akcjami w niektórych przedziałach 5-minutowych) - poniżej zaprezentowano kod, który je usuwa:
+
+
+```{r, echo=TRUE, results=FALSE }
+#Dokladanie obserwacji brakujcych dla CD project
+nowyDzien = TRUE
+#Zmienna ta informuje ile okresow pieciominutowych mamy w godzinie (kazda pelna godzina powinna miec ich 12)
+ile5minut = 0
+poprzedni = cdProj$`<TIME1>`[1]
+zakres = nrow(cdProj)
+i=1
+
+while (i <= zakres) {
+  #Na pocztku sprawdzamy czy zaczynamy nowy dzien
+  if(nowyDzien){
+    #Jesli mamy godzine 9:00 jako pierwsza to zwiekszamy liczbe okresow 5-minutowych o 1 oraz 
+    #zmieniamy flage nowyDzien na false, poniewaz jestesmy juz w trakcie dnia
+    if(cdProj$`<TIME1>`[i] == 90000){
+      nowyDzien = FALSE
+      ile5minut = ile5minut +1
+    }else{
+      #natomiast jesli rozpoczynamy nowy dzien ale pierwsza godzina nie jest 9:00 to trzeba uzupelnic pierwsza
+      #obserwacje
+      cdProj <- insertRows(cdProj, i, new=cdProj[i-1,])
+      cdProj$`<DATE>`[i] = cdProj$`<DATE>`[i+1]
+      nowyDzien = FALSE
+      ile5minut = ile5minut +1
+    }
+    poprzedni = cdProj$`<TIME1>`[i]
+    
+  }else{
+    #rozważamy przypadek, gdy jestesmy w dalszej czesci dnia (po godz 9:00)
+    #gdy ile5minut=12 oznacza ze mamy nowa godzine 
+    if(ile5minut == 12){
+      #wiec sprawdzamy czy faktycznie jest odpowiednia roznica, jesli nie
+      #to dokladamy brakujaca obserwacje
+      if(cdProj$`<TIME1>`[i] != poprzedni + 4500){
+        cdProj <- insertRows(cdProj, i, new=cdProj[i-1,])
+        cdProj$`<TIME1>`[i] = poprzedni + 4500
+      }
+      ile5minut = 1
+      
+    }else{
+      #gdy ile5minut jest rozne od 12 to sprawdzamy inna roznice i postepujemy
+      #jak wczesniej
+      if(cdProj$`<TIME1>`[i] != poprzedni + 500){
+        cdProj <- insertRows(cdProj, i, new=cdProj[i-1,])
+        cdProj$`<TIME1>`[i] = poprzedni + 500
+        #trzeba osobno rozważyc roz=wniez przypadek gdy mamy zamkniecie gieldy
+        #czyli godzine 16:45 poniewaz wtedy konczymy dzien i przechodzimy do kolejnego
+      }else if(cdProj$`<TIME1>`[i] == 164500 && cdProj$`<TIME1>`[i] == poprzedni + 500){
+        nowyDzien = TRUE
+        ile5minut = 0
+        i=i+1
+        next
+      }
+      ile5minut = ile5minut +1
+    }
+    
+    poprzedni = cdProj$`<TIME1>`[i]
+  }
+  i = i+1
+  #dynamicznie zwiekszamy zakres, poniewaz w przypadku dodania brakujacej obserwacji 
+  #musimy uaktualic liczbe wszystkich obserwacji
+  zakres = nrow(cdProj)
+}
+
+##Dokladanie obserwacji brakujcych dla 11bit
+nowyDzien = TRUE
+ile5minut = 0
+poprzedni = bit11$`<TIME1>`[1]
+zakres = nrow(bit11)
+i=1
+
+while (i <= zakres) {
+  if(nowyDzien){
+    if(bit11$`<TIME1>`[i] == 90000){
+      nowyDzien = FALSE
+      ile5minut = ile5minut +1
+    }else{
+      bit11 <- insertRows(bit11, i, new=bit11[i-1,])
+      bit11$`<DATE>`[i] = bit11$`<DATE>`[i+1]
+      bit11$`<TIME1>`[i] = 90000
+      nowyDzien = FALSE
+      ile5minut = ile5minut +1
+    }
+    poprzedni = bit11$`<TIME1>`[i]
+    
+  }else{
+    
+    if(ile5minut == 12){
+      if(bit11$`<TIME1>`[i] != poprzedni + 4500){
+        bit11 <- insertRows(bit11, i, new=bit11[i-1,])
+        bit11$`<TIME1>`[i] = poprzedni + 4500
+      }
+      ile5minut = 1
+      
+    }else{
+      if(bit11$`<TIME1>`[i] != poprzedni + 500){
+        bit11 <- insertRows(bit11, i, new=bit11[i-1,])
+        bit11$`<TIME1>`[i] = poprzedni + 500
+      }else if(bit11$`<TIME1>`[i] == 164500 && bit11$`<TIME1>`[i] == poprzedni + 500){
+        nowyDzien = TRUE
+        ile5minut = 0
+        i=i+1
+        next
+      }
+      ile5minut = ile5minut +1
+    }
+    
+    poprzedni = bit11$`<TIME1>`[i]
+  }
+  i = i+1
+  zakres = nrow(bit11)
+}
+  
+
+
+```
+
+## 1.4 Stworzenie 5-minutowych logarytmicznych stóp zwrotu
+
+
+```{r pressure, echo=TRUE}
+cdProj_stopy <- diff(log(cdProj$`<CLOSE>`))
+bit11_stopy <- diff(log(bit11$`<CLOSE>`))
+```
+
+### a) Usunięcie stóp zwrotu overnight
+Po uzupełnieniu wszystkich braków danych każdy z szeregów notowań liczą 3196 obserwacji - zatem stóp zwrotu będzie 3195. Natomiast 5-minutowych okresów w ciągu jednodniowej (9:00-16:45) sesji jest 93. Kolejna stopa zwrotu (nr 94) będzie stopą overnight - dotyczy ona różnicy pomiędzy 9:00, a 16:45 dnia poprzedniego. Zatem usuwając co 94. obserwację z całego wektora stóp zwrotu usunie się jednocześnie wszystkie stopy overnight.
+```{r}
+#cdP_stopy_do_usuniecia
+cdP_stopy_do_usuniecia <- c()
+for(j in 1:floor(length(cdProj_stopy)/94)) {cdP_stopy_do_usuniecia <- c(cdP_stopy_do_usuniecia, 94*j)}
+cdProj_stopy <- cdProj_stopy[-cdP_stopy_do_usuniecia]
+
+#bit11_stopy_do_usuniecia
+bit11_stopy_do_usuniecia <- c()
+for(j in 1:floor(length(bit11_stopy)/94)) {bit11_stopy_do_usuniecia <- c(bit11_stopy_do_usuniecia, 94*j)}
+bit11_stopy <- bit11_stopy[-bit11_stopy_do_usuniecia]
+
+
+
+```
+
+### b) Obliczenie przyblizonej wartości zawieranych transakcji
+Przybliżona wartość transakcji zawieranych w poszczególnych 5-minutowych przedziałach czasowych zapisana możne zostać jako iloczyn ceny zamknięcia i wolumenu.
+
+```{r warning=FALSE}
+for(i in 1:nrow(cdProj)){
+  cdProj$`<CLOSExVol>`[i] = cdProj$`<CLOSE>`[i] * cdProj$`<VOL>`[i]
+}
+
+for(i in 1:nrow(bit11)){
+  bit11$`<CLOSExVol>`[i] = bit11$`<CLOSE>`[i] * bit11$`<VOL>`[i]
+}
+```
+
+### Wykresy przekrojowych średnich stóp zwrotu
+Przed utworzeniem wykresu czas zapisujemy w formacie HH:MM. Następnie tworzymy nową ramkę danych, do której zapisane zostaną dane dotyczące czasu oraz stopy zwrotu. Przekrojowe średnie stopy zwrotu otrzymujemy za pomocą funkcji aggregate(). Do wykresów natomiast wykorzystano ggplot().
+
+```{r fig.height = 5, fig.width = 13, fig.align = "center" , echo=FALSE}
+for(i in 1:nrow(cdProj)){
+  cdProj$`<TIME>`[i] = substr(as.POSIXct(sprintf("%04.0f", cdProj$`<TIME1>`[i]/100), format='%H%M'), 12, 16)
+  #12 i 16 oznacza, że chcemy wypisac tylko czesc wyniku substringa od miejsca 12 do 16
+}
+
+for(i in 1:nrow(bit11)){
+  bit11$`<TIME>`[i] = substr(as.POSIXct(sprintf("%04.0f", bit11$`<TIME1>`[i]/100), format='%H%M'), 12, 16)
+  #12 i 16 oznacza, że chcemy wypisac tylko czesc wyniku substringa od miejsca 12 do 16
+}
+
+#Tworze nowe dataframy dla godzin i stop zwrotu, zeby latwiej sie rysowalo
+
+przekr_cdProj <- data.frame(cdProj$`<TIME>`,rep(0,nrow(cdProj)))
+przekr_bit11 <- data.frame(bit11$`<TIME>`,rep(0,nrow(bit11)))
+
+colnames(przekr_bit11) <- c("time","rate")
+colnames(przekr_cdProj) <- c("time","rate")
+
+przekr_bit11 <- subset(przekr_bit11, time!="09:00")
+przekr_cdProj <- subset(przekr_cdProj, time!="09:00")
+
+przekr_bit11$rate <- bit11_stopy
+przekr_cdProj$rate <- cdProj_stopy
+
+#Obliczanie średnich dl każdej godziny (bez 9, bo ją usunalem)
+stop_przekr_11bit <- aggregate(przekr_bit11$rate, list(przekr_bit11$time), mean)
+stop_przekr_cdProj <- aggregate(przekr_cdProj$rate, list(przekr_cdProj$time), mean)
+
+colnames(stop_przekr_11bit) <- c("time","rate")
+colnames(stop_przekr_cdProj) <- c("time","rate")
+
+ggplot(stop_przekr_11bit, aes(x = time, y = rate, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Przekrojowe średnie stopy zwrotu \n 11 bit")
+
+ggplot(stop_przekr_cdProj, aes(x = time, y = rate, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Przekrojowe średnie stopy zwrotu \n CD Projekt")
+
+
+```
+Powyższe wykresy potwierdzają, że średnie przekrojowe stóp zwrotu są estymatorem wartości oczekiwanej - zaprezentowane szeregi czasowe oscylują wokół wartości 0. Zauważyć można, że dla spółki z indeksu mWIG40 początkowy okres po otwarciu giełdy charakteryzował się średnio większymi zmianami (w odniesieniu do pozostałej części sesji) niż dla większej ze spółek. W odniesieniu do całej sesji wnioski są podobne - logarytmiczne stopy zwrotu podlegały większym wahaniom dla 11 bit, niż CD Projekt. 
+
+### Wykresy średniego zlogarytmowanego wolumenu obrotu w 5-minutowych przedziałach
+
+Do zaprezentowania średniego zlogarytmowanego wolumenu obrotu również wykorzystano aggregate oraz ggplot. 
+```{r fig.height = 5, fig.width = 13, fig.align = "center" , echo=FALSE}
+wol_11bit <- aggregate(log(bit11$`<VOL>`), list(bit11$`<TIME>`), mean)
+wol_cdProj <- aggregate(log(cdProj$`<VOL>`), list(cdProj$`<TIME>`), mean)
+
+colnames(wol_11bit) <- c("time","vol")
+colnames(wol_cdProj) <- c("time","vol")
+
+ggplot(wol_11bit, aes(x = time, y = vol, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Średni zlogarytmizowany wolumen obrotu \n 11 bit")
+  
+
+ggplot(wol_cdProj, aes(x = time, y = vol, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Średni zlogarytmizowany wolumen obrotu \n CD Projekt")
+
+
+
+```
+Z wykresów zlogarytmizowanego wolumenu odczytać można następujące wnioski:     
+* Największe wartości w każdej spółce przypadały na zamknięcie oraz otwarcie sesji  
+* CD Projekt posiadał średnio ponad dwukrotnie większe wartości zlogarytmizowanego wolumenu obrotu w odniesieniu do 11 bit   
+* Dla CD Projekt wzrost wolumenu obrotu następował systematycznie od około 14:00 - może mieć to związek z większym zasięgiem spółki (jest rozpoznawalna za granicą) i wpływem informacji pochodzących z USA na działania inwestorów 
+
+### Wykresy średniej zlogarytmowanej wartości obrotu w 5-minutowych przedziałach
+
+```{r fig.height = 5, fig.width = 13, fig.align = "center" , echo=FALSE}
+wart_11bit <- aggregate(log(bit11$`<CLOSExVol>`), list(bit11$`<TIME>`), mean)
+wart_cdProj <- aggregate(log(cdProj$`<CLOSExVol>`), list(cdProj$`<TIME>`), mean)
+
+colnames(wart_11bit) <- c("time","val")
+colnames(wart_cdProj) <- c("time","val")
+
+ggplot(wart_11bit, aes(x = time, y = val, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Średnia zlogarytmizowana wartość obrotu \n 11 bit")
+
+ggplot(wart_cdProj, aes(x = time, y = val, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Średnia zlogarytmizowana wartość obrotu \n CD Projekt")
+
+```
+Powyższe wykresy otrzymano w analogiczny sposób. Ich analiza prowadzi do ciekawego wniosku - wydają się one być przesuniętymi w pionie wykresami zlogarytmizowango obrotu, przez co sprawiają wrażenie, jakby dodano do nich stałą. Efekt ten wyjaśnić można następująco: licząc średnią zlogarytmizowanej wartości obrotu, liczymy właściwie średnią zlogarytmizowanego iloczynu wolumenu i ceny zamknięcia - a korzystając z własności logarytmu oznacza to, że jest to suma średniego zlogarytmizowanego wolumenu obrotu i średniej zlogarytmizowanej ceny zamknięcia. Oznacza to, że średnia logarytmów cen zamknięcia (dla poszczególnych 5-minutowych przedziałów) jest podobna dla całej sesji - co wynika z charakteru logarytmu, który "wypłaszcza" i upodabnia do siebie większe wartości (a rozpatrywane ceny zamknięcia były liczbami 3 cyfrowymi).
+
+## 2 a) Wyznaczenie przekrojowych średnich z wartości bezwzględnych 5-minutowych stóp zwrotu
+
+Wartości bezwzględne uzyskano za pomocą funkcji abs().
+
+```{r fig.height = 5, fig.width = 13, fig.align = "center"}
+abs_stop_przekr_11bit <- aggregate(abs(przekr_bit11$rate), list(przekr_bit11$time), mean)
+abs_stop_przekr_cdProj <- aggregate(abs(przekr_cdProj$rate), list(przekr_cdProj$time), mean)
+
+colnames(abs_stop_przekr_11bit) <- c("time","rate")
+colnames(abs_stop_przekr_cdProj) <- c("time","rate")
+
+ggplot(abs_stop_przekr_11bit, aes(x = time, y = rate, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Przekrojowe średnie z wartości bezwzgl. stóp zwrotu \n 11 bit")
+
+ggplot(abs_stop_przekr_cdProj, aes(x = time, y = rate, group=1)) +
+  geom_point() +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ggtitle("Przekrojowe średnie z wartości bezwzgl. stóp zwrotu \n CD Projekt")
+
+```
+Powyższe wykresy wskazują na występowanie śróddziennej sezonowości zmienności - są one U-kształtne, z wyraźnie zaznaczonymi wierzchołkami dla początku i końca sesji - w szczególności zauważyć to można na wykresie dla CD Projekt. Sezonowość ta oznacza istnienie czynników powodujących wzrost zainteresowania akcjami rozpatrywanych spółek (wpływ mikrostruktury (np. wspólne godziny pracy giełd europejskich i nowojorskiej), a także informacji pozagiełdowych uzyskiwanych w okresie zamknięcia giełdy) na początku i na zakończenie sesji.
+
+## 2 b) Badanie autokorelacji wartości bezwzględnych 5-minutowych stóp zwrotu
+``` {r fig.height = 7, fig.width = 16, fig.align = "center"}
+bit11_acf<-acf(abs(bit11_stopy), type = c("correlation"), lag.max = 500, plot = FALSE)
+plot(bit11_acf$acf[2:501],
+     type="l", 
+     main="Autocorrelation Function 11 bit", 
+     xlab="Lag",     
+     ylab="ACF", 
+     las=1,
+     xaxt="n")
+abline(h=0)
+x <- c(1:500)
+y <- c(1:500)
+axis(1, at=x, labels=y)
+
+cdProj_acf<-acf(abs(cdProj_stopy), type = c("correlation"), lag.max = 500, plot = FALSE)
+
+plot(cdProj_acf$acf[2:501],
+     type="l", 
+     main="Autocorrelation Function CD Projekt", 
+     xlab="Lag",     
+     ylab="ACF", 
+     las=1,
+     xaxt="n")
+abline(h=0)
+x <- c(1:500)
+y <- c(1:500)
+axis(1, at=x, labels=y)
+
+```
+Szczególnie wyraźną autokorelację zaobserwować można na korelogramie spółki CD Projekt - wynikać to może z kształtu wykresu średnich przekrojowych 5-minutowych stóp zwrotu - jest on "bardziej U-kształtny", z bardziej odznaczającymi się zmianami w ciągu trwania sesji. Taki stosunek kolejnych średnich powoduje, że rozpatrując cały szereg wartości bezwzględnych 5-minutowych stóp zwrotu kolejne opóźnienia natrafiać będą na charakterystyczne dla danego momentu wartości, przez co autokorelacja nie słabnie. Dla 11 bit z średnimi bardziej zbliżonymi do siebie różnice te zanikają, przez co korelogram w mniejszym stopniu wskazuje na zaburzenia autokorelacji.
+
+## 3 Usuwanie sezonowości zmienności
+
+Aby usunąć sezonowość zmienności podzielono stopy zwrotu z danych 5-minutowych przedziałów przez odpowiadajace im średnie z wartości bezwzględnych. W tym celu zwielokrotniono wektor średnich z wartości bezwzględnych 34 razy (ponieważ 3196 / 94 = 34 - jest to rozpatrywana liczba dni (sesji całodziennych)), a następnie podzielono przez siebie wektory stóp i średnich - R dzieli wówczas odpowiadające sobie elementy przez siebie.  
+Warto podkreślić, że taka metoda usuwania sezonowości zmienności sprawdza się wtedy gdy zmienność dzienna jest stała - gdyby np. informacje makroekonmiczne publikowane były o nieregularnych porach (jest to jeden z czynników wpływających na zmienność na giełdzie), wówczas sposób ten prowadziłby do nadmiernego spłaszczania wartości stóp zwrotu (część okresów niedotknięta zmiennością byłaby sztucznie zaniżana przez znaczne wartości średnich - powstałe na skutek występowania okresów o dużej zmienności)
+``` {r}
+replicate_stop_cdProj <- rep(abs_stop_przekr_cdProj$rate, times = 34)
+dziel_cdProj <- cdProj_stopy/replicate_stop_cdProj
+
+replicate_stop_bit11 <- rep(abs_stop_przekr_11bit$rate, times = 34)
+dziel_11bit <- bit11_stopy/replicate_stop_bit11
+
+
+```
+
+## 4 Badanie autokorelacji wartości bezwzględnych zmodyfikowanych stóp zwrotu
+
+Korelogramy tworzone są analogicznie do punktu 2b)
+
+```{r fig.height = 7, fig.width = 16, fig.align = "center"}
+dziel_bit11_acf<-acf(abs(dziel_11bit), type = c("correlation"), lag.max = 500, plot = FALSE)
+
+plot(dziel_bit11_acf$acf[2:length(dziel_bit11_acf$acf)],
+     type="l", 
+     main="Autocorrelation Function 11 bit", 
+     xlab="Lag",     
+     ylab="ACF", 
+     #ylim=c(-0.2,0.2), # this sets the y scale to -0.2 to 0.2
+     las=1,
+     xaxt="n")
+abline(h=0)
+x <- c(1:500)
+y <- c(1:500)
+axis(1, at=x, labels=y)
+
+dziel_cdProj_acf<-acf(abs(dziel_cdProj), type = c("correlation"), lag.max = 500, plot = FALSE)
+
+plot(dziel_cdProj_acf$acf[2:length(dziel_cdProj_acf$acf)],
+     type="l", 
+     main="Autocorrelation Function CD Projekt", 
+     xlab="Lag",     
+     ylab="ACF", 
+     #ylim=c(-0.2,0.2), # this sets the y scale to -0.2 to 0.2
+     las=1,
+     xaxt="n")
+abline(h=0)
+x <- c(1:500)
+y <- c(1:500)
+axis(1, at=x, labels=y)
+
+
+```
+Transformacja przyniosła szczególny skutek dla danych dotyczących spółki z indeksu WIG20. Korelogram nie wskazuje na sezonowość zmienności, a wahania zostały wyraźnie wytłumione. Dla mniejszej ze spółek zmiany nie są aż tak wyraźne. Nie tylko dlatego, że zaburzenia autokorelacji były mniej widoczne na pierwotnie rozpatrywanych danych, lecz również dlatego, że zauważyć można pewne powtarzajace się zaburzenie autokorelacji - dla k od 1 do 150, od 150 do 300 i od 301 do 450.  
+Na tej podstawie stwierdzić można, że przyjęta metoda redukuje sezonowość zmienności, natomiast nie jest całkowicie skuteczna - jej rezultat może różnić się w zależności od danych do których została wykorzystana. 
+
+</div>
+
